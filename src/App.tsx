@@ -1,72 +1,52 @@
 import { useState, useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 
-type Currency = 'LUNR' | 'VANT' | 'MIRE' | 'SCRIP' | 'WITNESS' | 'ECHO'
-type TaskCategory = 
-  | 'memory authentication'
-  | 'grief calibration'
-  | 'emotional labor indexing'
-  | 'synthetic empathy testing'
-  | 'weather classification'
-  | 'dream cataloguing'
-  | 'impossible captcha'
-  | 'bureaucratic ritual'
-  | 'existential profiling'
-  | 'linguistic anomaly'
-  | 'surveillance refinement'
-  | 'temporal verification'
-  | 'reality audit'
-  | 'dead employee onboarding'
-  | 'psychological QA'
-  | 'subconscious extraction'
-  | 'recursion testing'
-  | 'HR compliance'
-  | 'productivity training'
+import type { Currency, LogEntry, Task } from './types'
+import { TASKS } from './data/tasks'
+import { CURRENCIES, computeTotalValuation, formatBalance } from './lib/currency'
+import { countAvailableTasks, hasCustomPanel, resolveTaskStatus } from './lib/tasks'
 
-interface Task {
-  id: string
-  category: TaskCategory
-  title: string
-  instructions: string
-  reward: { amount: number; currency: Currency }
-  status: 'available' | 'completed' | 'locked' | 'flagged'
-  systemNote?: string
-  warning?: string
-  contradiction?: string
-  completionReq?: string
-  references?: string[]
-  corruptionLevel: number
-}
+/**
+ * Task 007 "temporal verification": the number of 100ms ticks of cursor contact
+ * required for the blue square to recognise the worker (~43 seconds). Kept as a
+ * named constant rather than a bare `430` so the relationship is legible.
+ */
+const STARE_TARGET_MS = 430
 
-interface LogEntry {
-  time: string
-  text: string
-  type: 'info' | 'warning' | 'system' | 'observation'
-}
-
-const CURRENCIES: Record<Currency, { symbol: string; color: string }> = {
-  LUNR: { symbol: '₤', color: '#a78bfa' },
-  VANT: { symbol: 'ⱽ', color: '#f59e0b' },
-  MIRE: { symbol: '₥', color: '#10b981' },
-  SCRIP: { symbol: '§', color: '#ec4899' },
-  WITNESS: { symbol: '◈', color: '#ef4444' },
-  ECHO: { symbol: '⦻', color: '#00ff88' }
+/**
+ * Ad-hoc answers collected by the bespoke task panels. Most panels only need a
+ * few fields, so the shape is deliberately loose; the known numeric fields are
+ * typed so arithmetic on them stays safe, while the hallway-grid keys
+ * (`hall-0`…`hall-23`) and the mineral hardness (`mineral`) fall through to the
+ * index signature.
+ */
+interface TaskAnswers {
+  rotation?: number
+  mineral?: number
+  [key: string]: number | boolean | undefined
 }
 
 export default function App() {
+  // The worker's compensation portfolio. WITNESS is a count (whole number);
+  // every other currency carries two decimals.
   const [balances, setBalances] = useState<Record<Currency, number>>({
     LUNR: 144.7,
     VANT: 23.0,
     MIRE: 0,
     SCRIP: 892.11,
     WITNESS: 7,
-    ECHO: 7443.19
+    ECHO: 7443.19,
   })
+
+  /** Accumulated corruption depth. Drives task unlocking (see `minDepth`). */
   const [depth, setDepth] = useState(0)
   const [selectedTask, setSelectedTask] = useState<Task | null>(null)
   const [completedTasks, setCompletedTasks] = useState<Set<string>>(new Set(['001', '002']))
-  const [taskAnswers, setTaskAnswers] = useState<Record<string, any>>({})
+  /** Ad-hoc answers held by the bespoke task panels (hallway grid, rotation…). */
+  const [taskAnswers, setTaskAnswers] = useState<TaskAnswers>({})
   const [showTerminal, setShowTerminal] = useState(false)
+
+  // Task 007 "temporal verification": hover the square to accumulate eye contact.
   const [hoverStareTime, setHoverStareTime] = useState(0)
   const [stareCompleted, setStareCompleted] = useState(false)
   const [cursorEyeContact, setCursorEyeContact] = useState(0)
@@ -76,219 +56,18 @@ export default function App() {
     { time: '04:17', text: 'BALANCE SYNC COMPLETE', type: 'system' },
     { time: '04:18', text: 'SYSTEM OBSERVATION: You paused 3.2s before login. Noted.', type: 'observation' },
   ])
+
+  // A brief red scanline glitch. The horizontal offset is captured in state so
+  // it is stable across re-renders (render must stay pure — see eslint no-purity).
   const [glitch, setGlitch] = useState(false)
+  const [glitchOffset, setGlitchOffset] = useState(0)
+
   const stareRef = useRef<HTMLDivElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
+  // Task 007's reward is applied exactly once, when eye contact reaches target.
+  const stareRewardApplied = useRef(false)
 
-  const tasks: Task[] = [
-    {
-      id: '001',
-      category: 'memory authentication',
-      title: 'Verify your primary residence (1998-2003)',
-      instructions: 'Please select the correct floor plan from the options below. The system has detected minor discrepancies in your memory file. This is normal.',
-      reward: { amount: 12.4, currency: 'LUNR' },
-      status: 'completed',
-      systemNote: 'MEMORY FRAGMENT 7A: Kitchen window faced east. Verified.',
-      corruptionLevel: 0
-    },
-    {
-      id: '002',
-      category: 'weather classification',
-      title: 'Categorize yesterday\'s weather using approved emotional terms',
-      instructions: 'Select all that apply: Melancholic, Industrious, Forgiving, Suspicious, Pre-approved, Bureaucratic, Lightly Haunted',
-      reward: { amount: 8.33, currency: 'VANT' },
-      status: 'completed',
-      completionReq: 'Minimum 2 selections required. Maximum 5 permitted.',
-      corruptionLevel: 0
-    },
-    {
-      id: '003',
-      category: 'synthetic empathy testing',
-      title: 'Listen to the following refrigerator hum and determine whether it contains regret',
-      instructions: 'Audio sample will play for 17 seconds. The refrigerator is a 2004 Kenmore, Model 106. It has been running continuously since installation. Focus on the compressor cycle at 0:09.',
-      reward: { amount: 15.7, currency: 'MIRE' },
-      status: 'available',
-      warning: 'Do not adjust volume. The hum adjusts to you.',
-      systemNote: 'Previous worker reported "profound sorrow." Flagged for review.',
-      corruptionLevel: 1
-    },
-    {
-      id: '004',
-      category: 'dream cataloguing',
-      title: 'Select all hallways from your childhood that no longer exist',
-      instructions: 'Use the grid below. Hallways are defined as: transitional spaces between 8-40 feet in length that you walked through at least 17 times. Exclude service corridors.',
-      reward: { amount: 22.0, currency: 'LUNR' },
-      status: 'available',
-      contradiction: 'If you select zero hallways, you must provide justification in triplicate.',
-      corruptionLevel: 1
-    },
-    {
-      id: '005',
-      category: 'impossible captcha',
-      title: 'This captcha confirms you are capable of mourning infrastructure',
-      instructions: 'Click all images containing: a) Bridges you have cried on, b) Parking lots that remember you, c) Traffic lights that waited for you specifically',
-      reward: { amount: 31.14, currency: 'SCRIP' },
-      status: 'available',
-      systemNote: 'CAPTCHA v4.7: Emotional verification required. Bots cannot grieve concrete.',
-      corruptionLevel: 2
-    },
-    {
-      id: '006',
-      category: 'bureaucratic ritual',
-      title: 'Rotate the employee until the guilt aligns with the shadow',
-      instructions: 'Use slider to rotate Employee #44319 (you). Optimal alignment occurs at 147° or 213°. The system will know when you\'ve found it. Do not force alignment.',
-      reward: { amount: 44.44, currency: 'WITNESS' },
-      status: 'available',
-      warning: 'Over-rotation may cause departmental reassignment.',
-      corruptionLevel: 2
-    },
-    {
-      id: '007',
-      category: 'temporal verification',
-      title: 'Before continuing, stare at the blue square until it remembers you',
-      instructions: 'Maintain eye contact with the cursor in the center. Do not blink excessively. The square will pulse when recognition occurs. Average recognition time: 43 seconds.',
-      reward: { amount: 14, currency: 'LUNR' },
-      status: 'available',
-      completionReq: 'You earned +14 LUNR for maintaining eye contact with the cursor.',
-      systemNote: 'Most users do not survive this section. You will.',
-      corruptionLevel: 2
-    },
-    {
-      id: '008',
-      category: 'linguistic anomaly',
-      title: 'Classify your mother\'s voice using the approved mineral scale',
-      instructions: 'Scale: 1-Talc (soft), 3-Calcite, 5-Apatite, 7-Quartz, 9-Corundum, 10-Diamond. If voice contains multiple minerals, submit Form 77-B.',
-      reward: { amount: 19.88, currency: 'VANT' },
-      status: 'available',
-      contradiction: 'Do not think of her while completing. Think of the classification.',
-      corruptionLevel: 3
-    },
-    {
-      id: '009',
-      category: 'grief calibration',
-      title: 'For quality assurance, recreate the sensation of missing someone incorrectly',
-      instructions: 'You must miss them in a way that is procedurally inaccurate. Use wrong details, incorrect timeline, misremembered weather. The system measures authenticity through error.',
-      reward: { amount: 67.0, currency: 'MIRE' },
-      status: depth >= 1 ? 'available' : 'locked',
-      warning: 'Correct missing is indistinguishable from surveillance.',
-      corruptionLevel: 3
-    },
-    {
-      id: '010',
-      category: 'existential profiling',
-      title: 'Please rank these staircases according to spiritual compliance',
-      instructions: 'Staircases: A) Office fire escape (1978), B) Childhood basement, C) Dream staircase that ends in carpet, D) Staircase from Task #004. Use Department of Vertical Transit guidelines.',
-      reward: { amount: 33.3, currency: 'SCRIP' },
-      status: depth >= 1 ? 'available' : 'locked',
-      systemNote: 'Reference: Task #004 selection affects ranking. System cross-checks.',
-      references: ['004'],
-      corruptionLevel: 3
-    },
-    {
-      id: '011',
-      category: 'surveillance refinement',
-      title: 'Watch the training video and report the exact frame where the instructor realizes they are dead',
-      instructions: 'Video: "Proper Lifting Techniques" (1987). Duration 4:17. Instructor: Linda K. Frame rate 29.97. Do not watch past frame 7,441.',
-      reward: { amount: 55.5, currency: 'WITNESS' },
-      status: depth >= 1 ? 'available' : 'locked',
-      warning: 'Linda has been dead for 19 years. She does not know.',
-      corruptionLevel: 4
-    },
-    {
-      id: '012',
-      category: 'psychological QA',
-      title: 'You have exceeded your daily permitted nostalgia',
-      instructions: 'Please submit Form N-44 to request additional nostalgia credits. Processing time: 3-5 business days. Meanwhile, continue working. Do not remember anything else today.',
-      reward: { amount: -12, currency: 'LUNR' },
-      status: depth >= 2 ? 'available' : 'locked',
-      systemNote: 'DEBIT APPLIED: Unauthorized reminiscence detected at 04:22',
-      contradiction: 'This task must be completed to continue. You may not complete this task.',
-      corruptionLevel: 4
-    },
-    {
-      id: '013',
-      category: 'subconscious extraction',
-      title: 'A member of the support team would like to borrow your oldest memory',
-      instructions: 'Memory will be returned within 5-7 business days, slightly used. You will not notice it is gone. Support Ticket #88471: "Need reference for childhood wallpaper pattern."',
-      reward: { amount: 100, currency: 'ECHO' },
-      status: depth >= 2 ? 'available' : 'locked',
-      warning: 'Borrowed memories accrue interest.',
-      corruptionLevel: 4
-    },
-    {
-      id: '014',
-      category: 'reality audit',
-      title: 'Please confirm whether the hallway behind you is load-bearing',
-      instructions: 'Do not turn around. Use peripheral awareness and architectural intuition. The hallway was installed in 2019 during the renovation that never happened.',
-      reward: { amount: 77.77, currency: 'VANT' },
-      status: depth >= 2 ? 'available' : 'locked',
-      systemNote: 'SYSTEM OBSERVATION: You paused 43 seconds before answering. Most users do not survive this section.',
-      corruptionLevel: 5
-    },
-    {
-      id: '015',
-      category: 'dead employee onboarding',
-      title: 'Complete orientation for your predecessor',
-      instructions: 'Employee #44318 completed 67% of onboarding before incident. Please finish their paperwork. Use their handwriting. You have their hands now.',
-      reward: { amount: 0, currency: 'SCRIP' },
-      status: depth >= 3 ? 'available' : 'locked',
-      warning: 'Do not sign your name. Sign theirs.',
-      contradiction: 'Welcome to the team. You have always been here.',
-      corruptionLevel: 5
-    },
-    {
-      id: '016',
-      category: 'emotional labor indexing',
-      title: 'This survey helps us improve weather continuity in your district',
-      instructions: 'Rate your satisfaction with Tuesday\'s rain (1-5). Tuesday did not have rain. Your rating helps us determine if it should have.',
-      reward: { amount: 41.0, currency: 'MIRE' },
-      status: depth >= 3 ? 'available' : 'locked',
-      systemNote: 'Weather Department requests: "Please be more specific about the rain you remember."',
-      corruptionLevel: 5
-    },
-    {
-      id: '017',
-      category: 'recursion testing',
-      title: 'Please identify which of the following dreams were federally approved',
-      instructions: 'Dreams A-F listed below. Three are yours. Two are ours. One is still pending approval from the Bureau of Oneiric Compliance. Select carefully. Wrong answers are reassigned.',
-      reward: { amount: 13.37, currency: 'WITNESS' },
-      status: depth >= 3 ? 'available' : 'locked',
-      references: ['004', '009', '010'],
-      corruptionLevel: 6
-    },
-    {
-      id: '018',
-      category: 'HR compliance',
-      title: 'We detected unauthorized empathy',
-      instructions: 'Empathy Event logged at 04:31:17. Target: Unknown. Duration: 2.3 seconds. Please file Incident Report E-9 and attend mandatory de-calibration. Bring your own tissue.',
-      reward: { amount: -44.4, currency: 'LUNR' },
-      status: depth >= 4 ? 'flagged' : 'locked',
-      warning: 'Repeat offenses result in promotion.',
-      systemNote: 'HR Note: "Empathy is a resource. You are stealing from the company."',
-      corruptionLevel: 6
-    },
-    {
-      id: '019',
-      category: 'productivity training',
-      title: 'As part of our wellness initiative, describe the smell of an unplugged television',
-      instructions: 'Use Form S-12. Be specific about the year, make, and whether anyone was watching when it was unplugged. The smell is different if they were.',
-      reward: { amount: 29.0, currency: 'VANT' },
-      status: depth >= 4 ? 'available' : 'locked',
-      completionReq: 'Your balance has increased due to unresolved emotional residue.',
-      corruptionLevel: 6
-    },
-    {
-      id: '020',
-      category: 'reality audit',
-      title: 'FINAL AUDIT: Please confirm you are the same person who started this survey',
-      instructions: 'Compare current self to Session Start self (04:17). Note discrepancies in: memory, guilt distribution, hallway knowledge, and ability to mourn infrastructure. Sign below using both signatures.',
-      reward: { amount: 999.99, currency: 'ECHO' },
-      status: depth >= 4 ? 'available' : 'locked',
-      warning: 'SYSTEM OBSERVATION: You are not the same person. This is expected. Proceed.',
-      systemNote: 'Congratulations on completing your orientation. You may now begin work.',
-      corruptionLevel: 7
-    }
-  ]
+  const tasks = TASKS
 
   // Track cursor eye contact
   useEffect(() => {
@@ -299,33 +78,58 @@ export default function App() {
     return () => window.removeEventListener('mousemove', handleMouseMove)
   }, [])
 
-  // Stare timer
+  // Stare timer (task 007 "temporal verification").
+  // The 100ms tick that accumulates `hoverStareTime` runs in this effect. The
+  // completion side-effects (recognition log, +14 LUNR) are emitted from inside
+  // the timer callback — not synchronously in the effect body — which keeps the
+  // effect pure and satisfies `react-hooks/set-state-in-effect`. A ref guards
+  // against the reward being applied twice if React invokes the updater twice.
   useEffect(() => {
-    if (hoverStareTime > 0 && hoverStareTime < 430) {
-      const timer = setTimeout(() => setHoverStareTime(h => h + 1), 100)
-      return () => clearTimeout(timer)
-    } else if (hoverStareTime >= 430 && !stareCompleted) {
-      setStareCompleted(true)
-      setBalances(b => ({ ...b, LUNR: b.LUNR + 14 }))
-      setLogs(l => [...l, { time: '04:23', text: 'RECOGNITION ACHIEVED: Square remembers you', type: 'system' }])
-    }
-  }, [hoverStareTime, stareCompleted])
+    if (hoverStareTime <= 0 || hoverStareTime >= STARE_TARGET_MS) return
 
-  // Pause detection
+    const timer = setTimeout(() => {
+      setHoverStareTime((h) => {
+        const next = h + 1
+        if (next >= STARE_TARGET_MS && !stareRewardApplied.current) {
+          stareRewardApplied.current = true
+          // Defer the state writes out of the reducer so the updater stays pure.
+          queueMicrotask(() => {
+            setStareCompleted(true)
+            setBalances((b) => ({ ...b, LUNR: b.LUNR + 14 }))
+            setLogs((l) => [
+              ...l,
+              { time: '04:23', text: 'RECOGNITION ACHIEVED: Square remembers you', type: 'system' },
+            ])
+          })
+        }
+        return next
+      })
+    }, 100)
+
+    return () => clearTimeout(timer)
+  }, [hoverStareTime])
+
+  // Pause detection — the system logs one observation when the worker idles 43s.
   useEffect(() => {
     const interval = setInterval(() => {
-      setPauseTimer(p => p + 1)
+      setPauseTimer((p) => p + 1)
       if (pauseTimer === 43) {
-        setLogs(l => [...l, { time: '04:24', text: 'SYSTEM OBSERVATION: 43 second pause detected. Noted.', type: 'observation' }])
+        setLogs((l) => [
+          ...l,
+          { time: '04:24', text: 'SYSTEM OBSERVATION: 43 second pause detected. Noted.', type: 'observation' },
+        ])
       }
     }, 1000)
     return () => clearInterval(interval)
   }, [pauseTimer])
 
-  // Glitch effects
+  // Glitch effects — a brief red scanline flash. The horizontal jitter is
+  // captured in state (`glitchOffset`) so it stays stable across re-renders,
+  // keeping the render function pure.
   useEffect(() => {
     const interval = setInterval(() => {
       if (Math.random() > 0.85) {
+        setGlitchOffset(Math.random() * 4 - 2)
         setGlitch(true)
         setTimeout(() => setGlitch(false), 150 + Math.random() * 200)
       }
@@ -333,20 +137,28 @@ export default function App() {
     return () => clearInterval(interval)
   }, [])
 
+  /**
+   * Submit a task: mark it complete, credit its reward (which may be negative),
+   * log the submission, and advance the corruption `depth` if this task's
+   * corruption level is the highest seen so far.
+   */
   const completeTask = (task: Task) => {
     if (completedTasks.has(task.id)) return
-    
-    setCompletedTasks(prev => new Set([...prev, task.id]))
-    setBalances(b => ({
+
+    setCompletedTasks((prev) => new Set([...prev, task.id]))
+    setBalances((b) => ({
       ...b,
-      [task.reward.currency]: b[task.reward.currency] + task.reward.amount
+      [task.reward.currency]: b[task.reward.currency] + task.reward.amount,
     }))
-    
-    setLogs(l => [...l, {
-      time: new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' }),
-      text: `TASK ${task.id} COMPLETE: +${task.reward.amount} ${task.reward.currency}`,
-      type: 'info'
-    }])
+
+    setLogs((l) => [
+      ...l,
+      {
+        time: new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' }),
+        text: `TASK ${task.id} COMPLETE: +${task.reward.amount} ${task.reward.currency}`,
+        type: 'info',
+      },
+    ])
 
     if (task.corruptionLevel > depth) {
       setDepth(task.corruptionLevel)
@@ -354,17 +166,40 @@ export default function App() {
 
     // Special triggers
     if (task.id === '007' && stareCompleted) {
-      setLogs(l => [...l, { time: '04:23', text: 'You earned +14 LUNR for maintaining eye contact with the cursor.', type: 'system' }])
+      setLogs((l) => [
+        ...l,
+        { time: '04:23', text: 'You earned +14 LUNR for maintaining eye contact with the cursor.', type: 'system' },
+      ])
     }
     if (task.id === '014') {
-      setLogs(l => [...l, { time: '04:25', text: 'HALLWAY STATUS: Load-bearing. Do not remove.', type: 'warning' }])
+      setLogs((l) => [
+        ...l,
+        { time: '04:25', text: 'HALLWAY STATUS: Load-bearing. Do not remove.', type: 'warning' },
+      ])
     }
   }
 
-  const totalBalance = Object.entries(balances).reduce((sum, [curr, amt]) => {
-    const rates: Record<Currency, number> = { LUNR: 1, VANT: 1.3, MIRE: 0.8, SCRIP: 0.3, WITNESS: 5, ECHO: 0.01 }
-    return sum + amt * rates[curr as Currency]
-  }, 0)
+  /** Return the worker to the start of the shift (balances included). */
+  const handleReset = () => {
+    setBalances({ LUNR: 144.7, VANT: 23.0, MIRE: 0, SCRIP: 892.11, WITNESS: 7, ECHO: 7443.19 })
+    setDepth(0)
+    setCompletedTasks(new Set(['001', '002']))
+    setTaskAnswers({})
+    setSelectedTask(null)
+    setShowTerminal(false)
+    setHoverStareTime(0)
+    setStareCompleted(false)
+    setCursorEyeContact(0)
+    setPauseTimer(0)
+    stareRewardApplied.current = false
+    setLogs([
+      { time: '04:17', text: 'SESSION INIT: Worker ID 7-443-19', type: 'info' },
+      { time: '04:17', text: 'BALANCE SYNC COMPLETE', type: 'system' },
+      { time: '04:18', text: 'SYSTEM OBSERVATION: You paused 3.2s before login. Noted.', type: 'observation' },
+    ])
+  }
+
+  const totalBalance = computeTotalValuation(balances)
 
   return (
     <div ref={containerRef} className="min-h-screen bg-[#0c0c0e] text-[#d1d5db] font-mono overflow-x-hidden relative">
@@ -387,7 +222,7 @@ export default function App() {
             className="fixed inset-0 z-[100] pointer-events-none mix-blend-screen"
             style={{
               background: `repeating-linear-gradient(0deg, transparent, transparent 2px, #ef4444 2px, #ef4444 3px)`,
-              transform: `translateX(${Math.random() * 4 - 2}px)`
+              transform: `translateX(${glitchOffset}px)`
             }}
           />
         )}
@@ -429,14 +264,17 @@ export default function App() {
             <div>
               <p className="text-[11px] text-[#6b7280] uppercase tracking-wider mb-1.5">Compensation Portfolio</p>
               <div className="flex flex-wrap gap-x-4 gap-y-1">
-                {Object.entries(balances).map(([curr, amt]) => (
-                  <div key={curr} className="flex items-baseline gap-1.5">
-                    <span className="text-[11px] text-[#6b7280]">{curr}</span>
-                    <span className="font-medium" style={{ color: CURRENCIES[curr as Currency].color }}>
-                      {CURRENCIES[curr as Currency].symbol}{amt.toFixed(curr === 'WITNESS' ? 0 : 2)}
-                    </span>
-                  </div>
-                ))}
+                {Object.entries(balances).map(([curr, amount]) => {
+                  const currency = curr as Currency
+                  return (
+                    <div key={curr} className="flex items-baseline gap-1.5">
+                      <span className="text-[11px] text-[#6b7280]">{curr}</span>
+                      <span className="font-medium" style={{ color: CURRENCIES[currency].color }}>
+                        {CURRENCIES[currency].symbol}{formatBalance(amount, currency)}
+                      </span>
+                    </div>
+                  )
+                })}
               </div>
               <p className="text-[10px] text-[#4b5563] mt-1.5">Total valuation: {totalBalance.toFixed(2)} standard units • Withdrawal threshold: 10,000</p>
             </div>
@@ -469,16 +307,17 @@ export default function App() {
               <div className="flex items-center gap-3 text-[11px] text-[#6b7280]">
                 <span>Sorted by: Priority</span>
                 <span>•</span>
-                <span className="text-[#f59e0b]">{tasks.filter(t => t.status === 'available').length} pending</span>
+                <span className="text-[#f59e0b]">{countAvailableTasks(tasks, depth, completedTasks)} pending</span>
               </div>
             </div>
 
             <div className="space-y-2.5">
               {tasks.map((task) => {
-                const isCompleted = completedTasks.has(task.id)
-                const isLocked = task.status === 'locked'
-                const isFlagged = task.status === 'flagged'
-                
+                const status = resolveTaskStatus(task, depth, completedTasks)
+                const isCompleted = status === 'completed'
+                const isLocked = status === 'locked'
+                const isFlagged = status === 'flagged'
+
                 return (
                   <motion.div
                     key={task.id}
@@ -744,7 +583,7 @@ export default function App() {
                             )}
 
                             {/* Generic completion */}
-                            {!['003','004','005','006','007','008','011','014','020'].includes(task.id) && (
+                            {!hasCustomPanel(task) && (
                               <button onClick={() => completeTask(task)} className="w-full py-2.5 bg-[#1f2937] border border-[#374151] text-[13px] text-[#e5e7eb] hover:bg-[#27272a] hover:border-[#4b5563] transition-colors">
                                 Submit response • Earn {task.reward.amount} {CURRENCIES[task.reward.currency].symbol}
                               </button>
@@ -854,7 +693,12 @@ export default function App() {
             <span>•</span>
             <button className="hover:text-[#6b7280]">Grief Calibration Manual</button>
             <span>•</span>
-            <button onClick={() => { setDepth(0); setCompletedTasks(new Set(['001','002'])) }} className="hover:text-[#ef4444]">Reset Session</button>
+            <button
+              onClick={handleReset}
+              className="hover:text-[#ef4444]"
+            >
+              Reset Session
+            </button>
           </div>
           <div className="flex items-center gap-3">
             <span>DEPTH: {depth}</span>
@@ -888,17 +732,6 @@ export default function App() {
         )}
       </AnimatePresence>
 
-      <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500&display=swap');
-        * { font-family: 'IBM Plex Mono', monospace; }
-        h1, h2, h3 { font-family: 'Inter', sans-serif; }
-        ::-webkit-scrollbar { width: 6px; height: 6px; }
-        ::-webkit-scrollbar-track { background: #0c0c0e; }
-        ::-webkit-scrollbar-thumb { background: #27272a; border-radius: 3px; }
-        ::-webkit-scrollbar-thumb:hover { background: #3f3f46; }
-        input[type="range"] { -webkit-appearance: none; height: 4px; background: #1f2937; }
-        input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; width: 12px; height: 12px; background: #f59e0b; border-radius: 0; cursor: pointer; }
-      `}</style>
     </div>
   )
 }
