@@ -1,1 +1,72 @@
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500&display=swap');
 @import "tailwindcss";
+
+/*
+ * Cognizant Rewards Platform — design tokens.
+ *
+ * The interface is deliberately built with inline Tailwind arbitrary values, but
+ * these custom properties document the canonical palette so the design language
+ * (see docs/design/visual-language.md) has a single, greppable source of truth.
+ * Prefer referencing these values in prose and docs; the JSX currently uses the
+ * literals directly.
+ */
+:root {
+  /* Ground */
+  --crp-ground: #0c0c0e;
+
+  /* Panels */
+  --crp-panel: #111113;
+  --crp-panel-alt: #0f0f10;
+  --crp-panel-strong: #18181b;
+
+  /* Hairlines */
+  --crp-hairline: #1f2937;
+  --crp-hairline-strong: #374151;
+
+  /* Text */
+  --crp-muted: #6b7280;
+  --crp-body: #9ca3af;
+  --crp-text: #e5e7eb;
+  --crp-text-dim: #4b5563;
+
+  /* Currency / state accents */
+  --crp-violet: #a78bfa; /* LUNR */
+  --crp-amber: #f59e0b;  /* VANT */
+  --crp-emerald: #10b981; /* MIRE */
+  --crp-pink: #ec4899;   /* SCRIP */
+  --crp-red: #ef4444;    /* WITNESS */
+  --crp-green: #00ff88;  /* ECHO */
+}
+
+/* The app's typographic system: monospace body, Inter for headings. */
+* {
+  font-family: 'IBM Plex Mono', ui-monospace, Menlo, Consolas, monospace;
+}
+h1, h2, h3 {
+  font-family: 'Inter', system-ui, sans-serif;
+}
+
+/* Slim, dark scrollbars consistent with the terminal aesthetic. */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: #0c0c0e; }
+::-webkit-scrollbar-thumb { background: #27272a; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #3f3f46; }
+
+/* The guilt-alignment slider (task 006) — square amber thumb on a hairline track. */
+input[type="range"] { -webkit-appearance: none; appearance: none; height: 4px; background: #1f2937; }
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 12px;
+  height: 12px;
+  background: #f59e0b;
+  border-radius: 0;
+  cursor: pointer;
+}
+input[type="range"]::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  background: #f59e0b;
+  border: 0;
+  border-radius: 0;
+  cursor: pointer;
+}
